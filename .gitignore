@@ -1,0 +1,7 @@
+# Scan data must never be committed. The hand-written fixtures under
+# testdata/ are the only exception.
+*.nessus
+!testdata/**/*.nessus
+
+*.tmp
+/nessknit
