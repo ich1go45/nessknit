@@ -84,6 +84,13 @@ Check for `3` in scripts: it means a scan is missing from the result.
   combined. A finding is a duplicate, and dropped, if it has the same
   plugin, port, protocol and plugin output as one already kept. The
   same plugin with different output is kept as a separate finding.
+- **Compliance checks.** These share one plugin and port and have no
+  plugin output, so they are also compared by check name and result. A
+  check repeated with the same result is dropped; a check whose result
+  changed between scans is kept alongside the earlier one. This is the
+  one place the merge differs from the Python script this tool
+  replaced, which kept only the first file's compliance checks for a
+  host.
 - **Host properties.** Combined across all scans of the host. Where two
   scans disagree on a property, the earlier file wins.
 - **Scan information.** Plugin 19506 (Nessus Scan Information) is kept
@@ -95,14 +102,6 @@ Check for `3` in scripts: it means a scan is missing from the result.
 A previous output file found inside an input directory is left out, so
 running `nessknit` twice in the same directory is safe. Naming the
 output file itself as an input is refused.
-
-### Known limitation: compliance scans
-
-Compliance checks all share one plugin ID and port and usually have no
-plugin output, so they look identical to the duplicate test above. When
-a host appears in more than one file, only the compliance checks from
-its first file are kept. Hosts that appear in a single file are not
-affected. The Python script this tool replaced behaved the same way.
 
 ### Files that cannot be merged
 

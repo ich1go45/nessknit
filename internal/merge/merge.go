@@ -159,9 +159,29 @@ func (m *merger) closeAll() {
 }
 
 // itemKey identifies a finding within one host.
+//
+// Compliance checks all share one plugin and port and have no
+// plugin_output; what tells them apart is the check's name and its
+// result, so those are part of the key when present.
 type itemKey struct {
 	plugin, port, proto string
 	output              [sha256.Size]byte // of the trimmed plugin_output text
+	compliance          [sha256.Size]byte // of the check name and result; zero if neither is present
+}
+
+// The children of a ReportItem whose text goes into its key. Each is
+// read from its first occurrence only, up to its first sub-element.
+const (
+	fieldOutput = iota
+	fieldCheckName
+	fieldCheckResult
+	fieldCount
+)
+
+var keyFields = map[string]int{
+	"plugin_output":         fieldOutput,
+	"compliance-check-name": fieldCheckName,
+	"compliance-result":     fieldCheckResult,
 }
 
 // child is one direct child element of a ReportHost.
@@ -411,18 +431,12 @@ func (m *merger) eachChild(o occurrence, fn func(child) error) error {
 	section := io.NewSectionReader(fh, h.Range.Start, h.Range.Len())
 	dec := xml.NewDecoder(bufio.NewReaderSize(section, 64<<10))
 
-	// plugin_output text is collected only from the first plugin_output
-	// child, and only up to its first sub-element.
-	const (
-		outputPending = iota
-		outputReading
-		outputDone
-	)
 	var (
-		depth  int
-		cur    child
-		output bytes.Buffer
-		state  int
+		depth   int
+		cur     child
+		text    [fieldCount]bytes.Buffer
+		seen    [fieldCount]bool
+		reading = -1 // the field being collected, or -1
 	)
 	for {
 		start := dec.InputOffset()
@@ -439,8 +453,11 @@ func (m *merger) eachChild(o occurrence, fn func(child) error) error {
 			switch {
 			case depth == 2:
 				cur = child{name: t.Name.Local, rng: index.Range{Start: h.Range.Start + start}}
-				output.Reset()
-				state = outputPending
+				for i := range text {
+					text[i].Reset()
+					seen[i] = false
+				}
+				reading = -1
 				if cur.name == "ReportItem" {
 					for _, a := range t.Attr {
 						if a.Name.Space != "" {
@@ -458,23 +475,33 @@ func (m *merger) eachChild(o occurrence, fn func(child) error) error {
 						}
 					}
 				}
-			case depth == 3 && cur.name == "ReportItem" && t.Name.Local == "plugin_output" && state == outputPending:
-				state = outputReading
-			case depth > 3 && state == outputReading:
-				state = outputDone
+			case depth == 3 && cur.name == "ReportItem":
+				if field, ok := keyFields[t.Name.Local]; ok && !seen[field] {
+					seen[field] = true
+					reading = field
+				}
+			case depth > 3:
+				reading = -1
 			}
 		case xml.CharData:
-			if depth == 3 && state == outputReading {
-				output.Write(t)
+			if depth == 3 && reading >= 0 {
+				text[reading].Write(t)
 			}
 		case xml.EndElement:
-			if depth == 3 && state == outputReading {
-				state = outputDone
+			if depth == 3 {
+				reading = -1
 			}
 			if depth == 2 {
 				cur.rng.End = h.Range.Start + dec.InputOffset()
 				if cur.name == "ReportItem" {
-					cur.key.output = sha256.Sum256(bytes.TrimSpace(output.Bytes()))
+					cur.key.output = sha256.Sum256(bytes.TrimSpace(text[fieldOutput].Bytes()))
+					if seen[fieldCheckName] || seen[fieldCheckResult] {
+						sum := sha256.New()
+						sum.Write(bytes.TrimSpace(text[fieldCheckName].Bytes()))
+						sum.Write([]byte{0})
+						sum.Write(bytes.TrimSpace(text[fieldCheckResult].Bytes()))
+						sum.Sum(cur.key.compliance[:0])
+					}
 				}
 				if err := fn(cur); err != nil {
 					return err

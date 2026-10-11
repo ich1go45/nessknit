@@ -264,11 +264,14 @@ text above, these win.
 6. **Rule 5 wording.** Nameless tags are kept only from the first
    occurrence that has a `HostProperties` block, which is what the
    Python script does.
-7. **Known limitation, inherited.** Compliance findings share one
-   plugin ID and port and usually have no `plugin_output`, so rule 8
-   treats those from a later occurrence of a host as duplicates.
-   Changing the key would break parity with the Python script and is
-   left as an open decision.
+7. **Compliance findings (changes rule 8).** Compliance findings
+   share one plugin ID and port and have no `plugin_output`, so rule 8
+   alone treats every one from a later occurrence of a host as a
+   duplicate. The key therefore also includes the trimmed text of the
+   item's first `compliance-check-name` and first `compliance-result`
+   children, matched by local name whatever their prefix. This is a
+   deliberate difference from the Python script, approved by the
+   author; success criterion 1 holds for everything else.
 
 ## Error handling
 
