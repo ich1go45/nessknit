@@ -91,9 +91,24 @@ func TestOutputFileIsExcluded(t *testing.T) {
 			t.Errorf("%s output: got %v, want %v", name, got, want)
 		}
 	}
-	// Also when the output is named explicitly as an input.
-	if got := resolve(t, "Combined.nessus", filepath.Join(dir, "Combined.nessus"), dir); !reflect.DeepEqual(got, want) {
-		t.Errorf("explicit: got %v, want %v", got, want)
+}
+
+// Leaving the output out of a directory listing is a convenience.
+// Naming it as an input is a mistake: the merge would overwrite a scan
+// it had left out.
+func TestOutputNamedAsAnInputIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	touch(t, dir, "a.nessus", "b.nessus")
+	a := filepath.Join(dir, "a.nessus")
+	for name, paths := range map[string][]string{
+		"same spelling":       {a, filepath.Join(dir, "b.nessus")},
+		"different spelling":  {filepath.Join(dir, "b.nessus"), filepath.Join(dir, "sub", "..", "a.nessus")},
+		"after its directory": {dir, a},
+	} {
+		_, err := Resolve(paths, a)
+		if !errors.Is(err, ErrOutputIsInput) {
+			t.Errorf("%s: err = %v, want ErrOutputIsInput", name, err)
+		}
 	}
 }
 

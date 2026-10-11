@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -180,5 +181,63 @@ func TestScanIgnoresSecondReport(t *testing.T) {
 	f := mustScan(t, src)
 	if len(f.Hosts) != 1 || f.Hosts[0].Name != "h1" {
 		t.Errorf("Hosts = %+v, want only h1", f.Hosts)
+	}
+}
+
+// Go's decoder accepts several things a strict XML parser rejects. Scan
+// must reject them itself, because it is also the check run on the
+// merged output.
+func TestScanRejectsWhatALenientDecoderAccepts(t *testing.T) {
+	wrap := func(body string) string {
+		return `<NessusClientData_v2><Report name="r"><ReportHost name="h">` + body + `</ReportHost></Report></NessusClientData_v2>`
+	}
+	item := `<ReportItem pluginID="1" port="0" protocol="tcp" severity="0"/>`
+	cases := []struct {
+		name, src, reason string
+	}{
+		{"text before the root", "JUNK" + wrap(item), "text outside the root element"},
+		{"text after the root", wrap(item) + "JUNK", "text outside the root element"},
+		{"second root", wrap(item) + "<extra/>", "more than one root element"},
+		{"duplicate attribute", wrap(`<ReportItem pluginID="1" pluginID="2" port="0"/>`), `duplicate attribute "pluginID"`},
+		{"undeclared element prefix", wrap(`<ReportItem pluginID="1"><cm:x>v</cm:x></ReportItem>`), `undeclared namespace prefix "cm"`},
+		{"undeclared attribute prefix", wrap(`<ReportItem pluginID="1" cm:a="v"/>`), `undeclared namespace prefix "cm"`},
+		{"prefix declared on a sibling only", `<NessusClientData_v2><Policy xmlns:cm="u"/><Report name="r"><ReportHost name="h"><cm:x/></ReportHost></Report></NessusClientData_v2>`, `undeclared namespace prefix "cm"`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := scan(t, c.src)
+			var rej *RejectError
+			if !errors.As(err, &rej) {
+				t.Fatalf("err = %v, want *RejectError", err)
+			}
+			if !strings.Contains(rej.Reason, c.reason) {
+				t.Errorf("reason = %q, want it to contain %q", rej.Reason, c.reason)
+			}
+		})
+	}
+}
+
+func TestScanAcceptsDeclaredPrefixesAndHarmlessSurroundings(t *testing.T) {
+	src := "\xef\xbb\xbf<?xml version=\"1.0\"?>\n<!-- before -->\n" +
+		`<NessusClientData_v2 xmlns:a="1"><Report name="r"><ReportHost name="h" xmlns:c="3" xml:lang="en"><a:x c:y="1"/></ReportHost></Report></NessusClientData_v2>` +
+		"\n<!-- after -->\n"
+	if f := mustScan(t, src); len(f.Hosts) != 1 {
+		t.Errorf("Hosts = %d, want 1", len(f.Hosts))
+	}
+}
+
+func TestScanRecordsNamespaceDeclarations(t *testing.T) {
+	src := `<NessusClientData_v2 xmlns:a="root-a" xmlns:b="root-b"><Policy xmlns:p="ignored"/>` +
+		`<Report name="r" xmlns:b="report-b" xmlns="default"><ReportHost name="h" xmlns:c="host-c"/><ReportHost name="plain"/></Report></NessusClientData_v2>`
+	f := mustScan(t, src)
+	want := []NS{{"", "default"}, {"a", "root-a"}, {"b", "report-b"}}
+	if !reflect.DeepEqual(f.NS, want) {
+		t.Errorf("File.NS = %v, want %v (sorted by prefix, Report overriding the root)", f.NS, want)
+	}
+	if got := f.Hosts[0].NS; !reflect.DeepEqual(got, []NS{{"c", "host-c"}}) {
+		t.Errorf("Hosts[0].NS = %v", got)
+	}
+	if got := f.Hosts[1].NS; got != nil {
+		t.Errorf("Hosts[1].NS = %v, want nil", got)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/ich1go45/nessknit/internal/index"
@@ -22,6 +23,10 @@ import (
 // scanInfoPlugin is "Nessus Scan Information". It describes a scan, not
 // a host, so only a host's first occurrence keeps it.
 const scanInfoPlugin = "19506"
+
+// maxOpenFiles bounds how many input files are held open at once, so
+// that the number of inputs is not limited by the descriptor limit.
+const maxOpenFiles = 32
 
 // ErrChanged reports that an input file is no longer the file that was
 // indexed, so its recorded offsets cannot be trusted.
@@ -46,23 +51,20 @@ func Write(w io.Writer, files []*index.File, opts Options) (*summary.Summary, er
 		log:   opts.Log,
 		sum:   &summary.Summary{Primary: files[0].Path, Files: make([]summary.FileStats, len(files))},
 		buf:   make([]byte, 256<<10),
+		open:  map[int]*os.File{},
 	}
+	defer m.closeAll()
 	for i, f := range files {
 		m.sum.Files[i].Path = f.Path
 		m.sum.Files[i].NamelessHosts = f.Nameless
-		fh, err := os.Open(f.Path)
+		// Fail before writing anything if a file has changed or gone.
+		st, err := os.Stat(f.Path)
 		if err != nil {
 			return nil, err
 		}
-		defer fh.Close()
-		st, err := fh.Stat()
-		if err != nil {
+		if err := unchanged(f, st); err != nil {
 			return nil, err
 		}
-		if st.Size() != f.Size || !st.ModTime().Equal(f.ModTime) {
-			return nil, fmt.Errorf("%s: %w", f.Path, ErrChanged)
-		}
-		m.src = append(m.src, fh)
 	}
 
 	// Group every host's occurrences, keeping first-seen order.
@@ -98,12 +100,62 @@ type occurrence struct {
 }
 
 type merger struct {
-	w     io.Writer
-	files []*index.File
-	src   []*os.File
-	log   *logx.Logger
-	sum   *summary.Summary
-	buf   []byte
+	w      io.Writer
+	files  []*index.File
+	open   map[int]*os.File // open input files, by index into files
+	recent []int            // keys of open, least recently used first
+	log    *logx.Logger
+	sum    *summary.Summary
+	buf    []byte
+}
+
+func unchanged(f *index.File, st os.FileInfo) error {
+	if st.Size() != f.Size || !st.ModTime().Equal(f.ModTime) {
+		return fmt.Errorf("%s: %w", f.Path, ErrChanged)
+	}
+	return nil
+}
+
+// src returns input file i, opening it if needed. At most maxOpenFiles
+// stay open; the least recently used is closed to make room. A handle
+// stays valid until src is called for a different file.
+func (m *merger) src(i int) (*os.File, error) {
+	if fh, ok := m.open[i]; ok {
+		for k, v := range m.recent {
+			if v == i {
+				m.recent = append(append(m.recent[:k:k], m.recent[k+1:]...), i)
+				break
+			}
+		}
+		return fh, nil
+	}
+	if len(m.recent) >= maxOpenFiles {
+		oldest := m.recent[0]
+		m.recent = m.recent[1:]
+		m.open[oldest].Close()
+		delete(m.open, oldest)
+	}
+	fh, err := os.Open(m.files[i].Path)
+	if err != nil {
+		return nil, err
+	}
+	st, err := fh.Stat()
+	if err == nil {
+		err = unchanged(m.files[i], st)
+	}
+	if err != nil {
+		fh.Close()
+		return nil, err
+	}
+	m.open[i] = fh
+	m.recent = append(m.recent, i)
+	return fh, nil
+}
+
+func (m *merger) closeAll() {
+	for _, fh := range m.open {
+		fh.Close()
+	}
 }
 
 // itemKey identifies a finding within one host.
@@ -127,13 +179,21 @@ func (m *merger) write(s string) error {
 
 // copyRange copies raw bytes from an input file to the output.
 func (m *merger) copyRange(file int, r index.Range) error {
-	_, err := io.CopyBuffer(m.w, io.NewSectionReader(m.src[file], r.Start, r.Len()), m.buf)
+	fh, err := m.src(file)
+	if err != nil {
+		return err
+	}
+	_, err = io.CopyBuffer(m.w, io.NewSectionReader(fh, r.Start, r.Len()), m.buf)
 	return err
 }
 
 func (m *merger) read(file int, r index.Range) ([]byte, error) {
+	fh, err := m.src(file)
+	if err != nil {
+		return nil, err
+	}
 	b := make([]byte, r.Len())
-	if _, err := m.src[file].ReadAt(b, r.Start); err != nil {
+	if _, err := fh.ReadAt(b, r.Start); err != nil {
 		return nil, fmt.Errorf("%s: %w", m.files[file].Path, err)
 	}
 	return b, nil
@@ -190,10 +250,13 @@ func (m *merger) writeHost(occs []occurrence) error {
 	if err != nil {
 		return err
 	}
-	if bytes.HasSuffix(open, []byte("/>")) {
-		open = append(open[:len(open)-2], '>')
+	decls, err := m.namespaceAttrs(occs)
+	if err != nil {
+		return err
 	}
-	if err := m.write(string(open) + "\n"); err != nil {
+	// Drop ">" or "/>" so the declarations can be added before it.
+	open = bytes.TrimSuffix(bytes.TrimSuffix(open, []byte(">")), []byte("/"))
+	if err := m.write(string(open) + decls + ">\n"); err != nil {
 		return err
 	}
 
@@ -268,11 +331,84 @@ func (m *merger) count(file int, c child) {
 	m.sum.Files[file].CountFinding(c.severity)
 }
 
+// namespaceAttrs returns the namespace declarations to add to a merged
+// host's opening tag, as attribute text.
+//
+// Elements are copied as raw bytes, so a prefix they use must mean in
+// the output what it meant in the file they came from. There, it was
+// declared on the root, on Report, or on the host tag. In the output,
+// only the primary's root and Report survive, plus the first
+// occurrence's host tag. Whatever else an occurrence relied on is
+// declared again here. The default namespace is treated like a prefix,
+// with xmlns="" restoring "no namespace".
+//
+// One tag cannot bind a prefix twice, so two occurrences of a host
+// that need different URIs for one prefix are an error.
+func (m *merger) namespaceAttrs(occs []occurrence) (string, error) {
+	bindings := func(f *index.File, h *index.Host) map[string]string {
+		b := map[string]string{"": ""}
+		for _, d := range f.NS {
+			b[d.Prefix] = d.URI
+		}
+		if h != nil {
+			for _, d := range h.NS {
+				b[d.Prefix] = d.URI
+			}
+		}
+		return b
+	}
+	inherited := bindings(m.files[0], nil) // what the output header declares
+	first := occs[0]
+	onHost := map[string]string{} // settled for this host
+	source := map[string]int{}    // which file settled it
+	for _, d := range first.host.NS {
+		onHost[d.Prefix], source[d.Prefix] = d.URI, first.file
+	}
+
+	var attrs strings.Builder
+	for _, o := range occs {
+		need := bindings(m.files[o.file], o.host)
+		prefixes := make([]string, 0, len(need))
+		for p := range need {
+			prefixes = append(prefixes, p)
+		}
+		sort.Strings(prefixes)
+		for _, p := range prefixes {
+			uri := need[p]
+			if have, ok := onHost[p]; ok {
+				if have != uri {
+					return "", fmt.Errorf("host %q: namespace prefix %q means %q in %s but %q in %s; these files cannot be merged",
+						first.host.Name, p, have, m.files[source[p]].Path, uri, m.files[o.file].Path)
+				}
+				continue
+			}
+			onHost[p], source[p] = uri, o.file
+			if got, ok := inherited[p]; ok && got == uri {
+				continue
+			}
+			var esc bytes.Buffer
+			if err := xml.EscapeText(&esc, []byte(uri)); err != nil {
+				return "", err
+			}
+			name := "xmlns"
+			if p != "" {
+				name += ":" + p
+			}
+			fmt.Fprintf(&attrs, ` %s="%s"`, name, esc.String())
+		}
+	}
+	return attrs.String(), nil
+}
+
 // eachChild streams one ReportHost occurrence and calls fn for each of
 // its direct children, in document order.
 func (m *merger) eachChild(o occurrence, fn func(child) error) error {
 	h := o.host
-	section := io.NewSectionReader(m.src[o.file], h.Range.Start, h.Range.Len())
+	fh, err := m.src(o.file)
+	if err != nil {
+		return err
+	}
+	section := io.NewSectionReader(fh, h.Range.Start, h.Range.Len())
 	dec := xml.NewDecoder(bufio.NewReaderSize(section, 64<<10))
 
 	// plugin_output text is collected only from the first plugin_output

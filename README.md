@@ -92,8 +92,17 @@ Check for `3` in scripts: it means a scan is missing from the result.
   between two scans still appears in the merged file, because the
   earlier scan reported it.
 
-The output file is never read as an input, so running `nessknit` twice
-in the same directory is safe.
+A previous output file found inside an input directory is left out, so
+running `nessknit` twice in the same directory is safe. Naming the
+output file itself as an input is refused.
+
+### Known limitation: compliance scans
+
+Compliance checks all share one plugin ID and port and usually have no
+plugin output, so they look identical to the duplicate test above. When
+a host appears in more than one file, only the compliance checks from
+its first file are kept. Hosts that appear in a single file are not
+affected. The Python script this tool replaced behaved the same way.
 
 ### Files that cannot be merged
 
@@ -102,9 +111,14 @@ not UTF-8, or is not a Nessus v2 export. `nessknit` does not try to
 repair broken files. The remaining files are still merged and the exit
 code is `3`.
 
-The merged file is written to a temporary file, checked, and only then
-moved into place. If anything fails, an existing output file is left
+The merged file is written to a temporary file beside the output,
+checked, and only then moved into place. If anything fails, the
+temporary file is removed and an existing output file is left
 untouched.
+
+Two files cannot be merged if the same host appears in both and they
+bind one XML namespace prefix to different addresses. `nessknit` stops
+with an error naming the files. Nessus exports do not do this.
 
 ## Development
 

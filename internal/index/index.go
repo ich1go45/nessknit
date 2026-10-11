@@ -9,10 +9,18 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"time"
 )
 
-const rootElement = "NessusClientData_v2"
+const (
+	rootElement  = "NessusClientData_v2"
+	xmlNamespace = "http://www.w3.org/XML/1998/namespace"
+)
+
+// NS is one namespace declaration. Prefix is empty for the default
+// namespace.
+type NS struct{ Prefix, URI string }
 
 // Range is a half-open byte range [Start, End) within a file.
 type Range struct{ Start, End int64 }
@@ -26,7 +34,8 @@ type Host struct {
 	Open     Range // the opening tag only
 	Props    Range // the first HostProperties child; valid if HasProps
 	HasProps bool
-	Items    int // number of ReportItem children
+	Items    int  // number of ReportItem children
+	NS       []NS // declarations on the ReportHost tag itself
 }
 
 // File is the index of one usable .nessus file.
@@ -49,6 +58,11 @@ type File struct {
 	// marks where a name attribute can be inserted.
 	ReportName    Range
 	HasReportName bool
+
+	// NS holds the namespace declarations in scope for the children of
+	// Report: the root's and Report's own, sorted by prefix. Elements
+	// copied out of this file depend on them.
+	NS []NS
 
 	Hosts    []Host
 	Nameless int // ReportHost elements skipped for having no name
@@ -91,6 +105,8 @@ func Scan(path string) (*File, error) {
 		sawRoot, haveReport bool
 		inReport, inProps   bool
 		cur                 *Host
+		scope               []NS  // declarations in force, innermost last
+		marks               []int // len(scope) before each open element
 	)
 	for {
 		start := dec.InputOffset()
@@ -107,10 +123,23 @@ func Scan(path string) (*File, error) {
 		end := dec.InputOffset()
 
 		switch t := tok.(type) {
+		case xml.CharData:
+			// The decoder allows text outside the root; XML does not.
+			if depth == 0 && len(bytes.TrimSpace(bytes.TrimPrefix(t, []byte("\xef\xbb\xbf")))) > 0 {
+				return reject("not well-formed XML: text outside the root element")
+			}
 		case xml.StartElement:
 			depth++
+			marks = append(marks, len(scope))
+			decls := declarations(t)
+			scope = append(scope, decls...)
+			if reason := checkElement(t, scope); reason != "" {
+				return reject("not well-formed XML: %s", reason)
+			}
 			switch {
-			case depth == 1 && !sawRoot:
+			case depth == 1 && sawRoot:
+				return reject("not well-formed XML: more than one root element")
+			case depth == 1:
 				sawRoot = true
 				if t.Name.Local != rootElement {
 					return reject("root element is <%s>, expected <%s>", t.Name.Local, rootElement)
@@ -118,6 +147,7 @@ func Scan(path string) (*File, error) {
 			case depth == 2 && !haveReport && t.Name.Local == "Report":
 				haveReport, inReport = true, true
 				f.ReportOpen = Range{start, end}
+				f.NS = effective(scope)
 			case depth == 3 && inReport && t.Name.Local == "ReportHost":
 				if f.HeaderEnd < 0 {
 					f.HeaderEnd = start
@@ -125,7 +155,7 @@ func Scan(path string) (*File, error) {
 				if name := attr(t, "name"); name == "" {
 					f.Nameless++
 				} else {
-					cur = &Host{Name: name, Open: Range{start, end}, Range: Range{Start: start}}
+					cur = &Host{Name: name, Open: Range{start, end}, Range: Range{Start: start}, NS: decls}
 				}
 			case depth == 4 && cur != nil && t.Name.Local == "HostProperties":
 				if !cur.HasProps && !inProps {
@@ -152,6 +182,8 @@ func Scan(path string) (*File, error) {
 				}
 				f.ReportSelfClosed = end == start
 			}
+			scope = scope[:marks[len(marks)-1]]
+			marks = marks[:len(marks)-1]
 			depth--
 		}
 	}
@@ -175,6 +207,70 @@ func Scan(path string) (*File, error) {
 		f.HeaderStart = 3
 	}
 	return f, nil
+}
+
+// declarations returns the namespace declarations written on a tag.
+func declarations(t xml.StartElement) []NS {
+	var decls []NS
+	for _, a := range t.Attr {
+		switch {
+		case a.Name.Space == "xmlns":
+			decls = append(decls, NS{a.Name.Local, a.Value})
+		case a.Name.Space == "" && a.Name.Local == "xmlns":
+			decls = append(decls, NS{"", a.Value})
+		}
+	}
+	return decls
+}
+
+// effective reduces a scope to one declaration per prefix, the
+// innermost winning, sorted by prefix.
+func effective(scope []NS) []NS {
+	byPrefix := map[string]string{}
+	for _, d := range scope {
+		byPrefix[d.Prefix] = d.URI
+	}
+	out := make([]NS, 0, len(byPrefix))
+	for prefix, uri := range byPrefix {
+		out = append(out, NS{prefix, uri})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Prefix < out[j].Prefix })
+	return out
+}
+
+// checkElement applies two rules the decoder does not enforce: a tag's
+// attribute names are unique, and every namespace prefix is declared.
+// It returns a reason, or "" if the tag is fine.
+//
+// The decoder replaces a declared prefix with its URI and leaves an
+// undeclared one as it was, so a name's Space is acceptable only if it
+// is a URI in scope.
+func checkElement(t xml.StartElement, scope []NS) string {
+	bound := func(space string) bool {
+		if space == "" || space == "xmlns" || space == xmlNamespace {
+			return true
+		}
+		for _, d := range scope {
+			if d.URI == space {
+				return true
+			}
+		}
+		return false
+	}
+	if !bound(t.Name.Space) {
+		return fmt.Sprintf("undeclared namespace prefix %q on <%s>", t.Name.Space, t.Name.Local)
+	}
+	for i, a := range t.Attr {
+		if !bound(a.Name.Space) {
+			return fmt.Sprintf("undeclared namespace prefix %q on attribute %s of <%s>", a.Name.Space, a.Name.Local, t.Name.Local)
+		}
+		for _, b := range t.Attr[:i] {
+			if a.Name == b.Name {
+				return fmt.Sprintf("duplicate attribute %q on <%s>", a.Name.Local, t.Name.Local)
+			}
+		}
+	}
+	return ""
 }
 
 func attr(t xml.StartElement, name string) string {

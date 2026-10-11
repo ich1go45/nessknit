@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"os"
 	"runtime"
 	"runtime/debug"
@@ -146,6 +147,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	paths, err := inputs.Resolve(o.paths, o.output)
+	if errors.Is(err, inputs.ErrOutputIsInput) {
+		fmt.Fprintf(stderr, "nessknit: %v\nRun 'nessknit --help' for usage.\n", err)
+		return exitUsage
+	}
 	if err != nil {
 		return fail("%v", err)
 	}
@@ -217,11 +222,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 // result, and renames it into place. On any error the temporary file
 // is removed and an existing output file is left as it was.
 func writeOutput(output string, files []*index.File, opts merge.Options) (sum *summary.Summary, err error) {
-	tmp := output + ".tmp"
-	fh, err := os.Create(tmp)
+	fh, err := createTemp(output)
 	if err != nil {
 		return nil, err
 	}
+	tmp := fh.Name()
 	defer func() {
 		if err != nil {
 			fh.Close()
@@ -249,6 +254,21 @@ func writeOutput(output string, files []*index.File, opts merge.Options) (sum *s
 		return nil, err
 	}
 	return sum, nil
+}
+
+// createTemp creates a new file beside output, named output plus a
+// random suffix and ".tmp". It never opens a file that already exists
+// and never follows a symlink, so it cannot damage anything in the
+// directory. Unlike os.CreateTemp, it leaves the file's permissions to
+// the umask, as for any file a command writes.
+func createTemp(output string) (*os.File, error) {
+	for {
+		name := fmt.Sprintf("%s.%08x.tmp", output, rand.Uint32())
+		fh, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o666)
+		if !errors.Is(err, os.ErrExist) {
+			return fh, err
+		}
+	}
 }
 
 // verify reads the written file back and checks that it is well-formed

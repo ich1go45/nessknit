@@ -4,6 +4,7 @@ package inputs
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,19 +13,26 @@ import (
 // ErrNoInputs is returned when the paths yield no file to merge.
 var ErrNoInputs = errors.New("no .nessus files found")
 
+// ErrOutputIsInput is returned when a path names the output file.
+var ErrOutputIsInput = errors.New("output file is also an input")
+
 // Resolve expands paths into files, in the order given. A directory
 // contributes the .nessus files directly inside it, sorted by name. A
 // file path is taken as it is, whatever its extension. With no paths,
 // the current directory is used.
 //
-// The output file is left out, and a file reached twice is listed
-// once. Both checks compare resolved absolute paths with symlinks
-// followed. A path that does not exist is an error.
+// A file reached twice is listed once. The output file is left out
+// when it is found inside a directory, so that a merge can be re-run
+// in place; naming it as a path is an error, because the merge would
+// then overwrite an input it had left out. Both checks compare
+// resolved absolute paths with symlinks followed. A path that does not
+// exist is an error.
 func Resolve(paths []string, output string) ([]string, error) {
 	if len(paths) == 0 {
 		paths = []string{"."}
 	}
-	seen := map[string]bool{canonical(output): true}
+	out := canonical(output)
+	seen := map[string]bool{out: true}
 	var files []string
 	add := func(p string) {
 		if c := canonical(p); !seen[c] {
@@ -38,6 +46,9 @@ func Resolve(paths []string, output string) ([]string, error) {
 			return nil, err
 		}
 		if !st.IsDir() {
+			if canonical(p) == out {
+				return nil, fmt.Errorf("%s: %w", p, ErrOutputIsInput)
+			}
 			add(p)
 			continue
 		}

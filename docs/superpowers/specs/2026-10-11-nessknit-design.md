@@ -1,7 +1,7 @@
 # nessknit design
 
 Date: 2026-10-11
-Status: awaiting review
+Status: approved; amended after code review (see "Amendments")
 
 ## Purpose
 
@@ -235,6 +235,40 @@ If it cannot be made to work, the fallback is to re-serialise elements
 through the encoder instead of copying raw bytes. That would need
 extra tests for attribute and namespace fidelity, and the design would
 be revised before continuing.
+
+## Amendments
+
+Made after the whole-branch code review. Where these differ from the
+text above, these win.
+
+1. **Namespaces.** Elements are copied as raw bytes, so each merged
+   host's opening tag re-declares any namespace prefix (or default
+   namespace) that its elements relied on and that the output header
+   does not declare identically. Pass 1 records the declarations on
+   the root, `Report` and each `ReportHost` tag. If two occurrences of
+   one host bind a prefix to different URIs, the merge fails with exit
+   `1` and nothing is written.
+2. **Stricter input check.** Pass 1 also rejects what the Go decoder
+   tolerates: text outside the root element, more than one root
+   element, duplicate attributes on a tag, and undeclared namespace
+   prefixes. Because the read-back check is the same scan, these are
+   checked on the output too.
+3. **Output named as an input.** The output file is left out silently
+   only when found inside an input directory. Naming it as a path is a
+   usage error, exit `2`.
+4. **Temporary file.** Its name is the output path plus a random
+   suffix and `.tmp`. It is created exclusively, so an existing file or
+   symlink is never opened.
+5. **Open files.** Pass 2 opens inputs on demand and keeps at most 32
+   open, re-checking size and modification time on each open.
+6. **Rule 5 wording.** Nameless tags are kept only from the first
+   occurrence that has a `HostProperties` block, which is what the
+   Python script does.
+7. **Known limitation, inherited.** Compliance findings share one
+   plugin ID and port and usually have no `plugin_output`, so rule 8
+   treats those from a later occurrence of a host as duplicates.
+   Changing the key would break parity with the Python script and is
+   left as an open decision.
 
 ## Error handling
 

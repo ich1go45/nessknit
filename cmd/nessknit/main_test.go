@@ -88,6 +88,16 @@ func hostNames(d nt.Doc) []string {
 	return names
 }
 
+// tempFiles lists leftover temporary files in dir.
+func tempFiles(t *testing.T, dir string) []string {
+	t.Helper()
+	found, err := filepath.Glob(filepath.Join(dir, "*.tmp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return found
+}
+
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
@@ -115,8 +125,8 @@ func TestMergeDirectory(t *testing.T) {
 			t.Errorf("stderr lacks %q:\n%s", want, o.stderr)
 		}
 	}
-	if exists(filepath.Join(dir, "Combined.nessus.tmp")) {
-		t.Error("temporary file left behind")
+	if left := tempFiles(t, dir); len(left) > 0 {
+		t.Errorf("temporary files left behind: %v", left)
 	}
 }
 
@@ -255,8 +265,8 @@ func TestFailuresWriteNothingAndKeepExistingOutput(t *testing.T) {
 			if got, _ := os.ReadFile(filepath.Join(dir, "Combined.nessus")); string(got) != "previous output" {
 				t.Errorf("existing output was changed to %q", got)
 			}
-			if exists(filepath.Join(dir, "Combined.nessus.tmp")) {
-				t.Error("temporary file left behind")
+			if left := tempFiles(t, dir); len(left) > 0 {
+				t.Errorf("temporary files left behind: %v", left)
 			}
 			if o.stdout != "" {
 				t.Errorf("stdout should be empty:\n%s", o.stdout)
@@ -326,7 +336,7 @@ func TestDryRunWritesNothing(t *testing.T) {
 	dir := scans(t)
 	o := nessknit(t, dir, "--dry-run")
 	o.wantCode(t, 0)
-	if exists(filepath.Join(dir, "Combined.nessus")) || exists(filepath.Join(dir, "Combined.nessus.tmp")) {
+	if exists(filepath.Join(dir, "Combined.nessus")) || len(tempFiles(t, dir)) > 0 {
 		t.Error("dry run wrote a file")
 	}
 	if !strings.Contains(o.stdout, "Output  : (dry run, nothing written)") || !strings.Contains(o.stdout, "hosts    : 3") {
@@ -388,5 +398,105 @@ func TestVerifyCatchesWrongCounts(t *testing.T) {
 	}
 	if err := verify(nt.Write(t, dir, "bad.xml", broken), summaryWith(0, 0)); err == nil || !strings.Contains(err.Error(), "output check failed: not well-formed") {
 		t.Errorf("malformed: err = %v", err)
+	}
+}
+
+func TestOutputThatIsAlsoAnInputIsRefused(t *testing.T) {
+	dir := scans(t)
+	before, _ := os.ReadFile(filepath.Join(dir, "a.nessus"))
+	o := nessknit(t, dir, "-o", "a.nessus", "a.nessus", "b.nessus")
+	o.wantCode(t, 2)
+	if !strings.Contains(o.stderr, "output file is also an input") || !strings.Contains(o.stderr, "a.nessus") {
+		t.Errorf("stderr:\n%s", o.stderr)
+	}
+	if after, _ := os.ReadFile(filepath.Join(dir, "a.nessus")); !bytes.Equal(before, after) {
+		t.Error("the input was overwritten")
+	}
+}
+
+// The temporary file must have a fresh name: a fixed one would
+// overwrite a file that happens to be called that, or write through a
+// symlink planted there.
+func TestTemporaryFileNeverClobbersAnExistingFile(t *testing.T) {
+	dir := scans(t)
+	other := t.TempDir()
+	victim := nt.Write(t, other, "victim.txt", "precious")
+	nt.Write(t, dir, "plain.nessus.tmp", "unrelated file")
+	if err := os.Symlink(victim, filepath.Join(dir, "linked.nessus.tmp")); err != nil {
+		t.Skip("symlinks not available:", err)
+	}
+
+	nessknit(t, dir, "-o", "plain.nessus").wantCode(t, 0)
+	nessknit(t, dir, "-o", "linked.nessus").wantCode(t, 0)
+
+	if got, _ := os.ReadFile(filepath.Join(dir, "plain.nessus.tmp")); string(got) != "unrelated file" {
+		t.Errorf("an existing .tmp file was overwritten: %q", got)
+	}
+	if got, _ := os.ReadFile(victim); string(got) != "precious" {
+		t.Errorf("the merge wrote through a symlink: %.40q", got)
+	}
+	if st, err := os.Lstat(filepath.Join(dir, "linked.nessus")); err != nil || st.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("output must be a regular file: %v, %v", st, err)
+	}
+	if len(nt.Parse(t, filepath.Join(dir, "plain.nessus")).Hosts) != 3 {
+		t.Error("merge result is wrong")
+	}
+}
+
+// An input named like the old fixed temporary file must survive.
+func TestInputNamedLikeATemporaryFileIsNotDestroyed(t *testing.T) {
+	dir := scans(t)
+	in := filepath.Join(dir, "out.nessus.tmp")
+	if err := os.Rename(filepath.Join(dir, "b.nessus"), in); err != nil {
+		t.Fatal(err)
+	}
+	nessknit(t, dir, "-o", "out.nessus", "a.nessus", "out.nessus.tmp").wantCode(t, 0)
+	if !exists(in) {
+		t.Error("the input file was deleted")
+	}
+	if got := hostNames(nt.Parse(t, filepath.Join(dir, "out.nessus"))); len(got) != 3 {
+		t.Errorf("hosts = %v", got)
+	}
+}
+
+func TestTemporaryFileIsRemovedWhenTheMergeFails(t *testing.T) {
+	dir := t.TempDir()
+	const cm = `<ReportItem pluginID="1" port="0" protocol="tcp" severity="0"><cm:x/></ReportItem>`
+	for i, uri := range []string{"urn:one", "urn:two"} {
+		nt.Write(t, dir, fmt.Sprintf("%d.nessus", i), `<NessusClientData_v2><Report name="r" xmlns:cm="`+uri+`"><ReportHost name="h">`+cm+`</ReportHost></Report></NessusClientData_v2>`)
+	}
+	o := nessknit(t, dir)
+	o.wantCode(t, 1)
+	if !strings.Contains(o.stderr, `namespace prefix "cm"`) || !strings.Contains(o.stderr, "nothing written") {
+		t.Errorf("stderr:\n%s", o.stderr)
+	}
+	if exists(filepath.Join(dir, "Combined.nessus")) || len(tempFiles(t, dir)) > 0 {
+		t.Error("a failed merge left files behind")
+	}
+}
+
+// Go's own XML decoder is lenient, so the output is also checked with
+// an independent strict parser. The inputs declare the compliance
+// namespace under different prefixes, in different places.
+func TestOutputSatisfiesAStrictParser(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not found")
+	}
+	dir := t.TempDir()
+	const uri = "http://www.nessus.org/cm"
+	nt.Write(t, dir, "1-python.nessus", `<NessusClientData_v2 xmlns:ns0="`+uri+`"><Policy/><Report name="Combined Report"><ReportHost name="h1"><ReportItem pluginID="21156" port="0" protocol="tcp" severity="3"><ns0:compliance-check-name>Check 1</ns0:compliance-check-name></ReportItem></ReportHost></Report></NessusClientData_v2>`)
+	nt.Write(t, dir, "2-nessus.nessus", `<?xml version="1.0"?><NessusClientData_v2><Policy/><Report name="B" xmlns:cm="`+uri+`"><ReportHost name="h2"><ReportItem pluginID="21156" port="0" protocol="tcp" severity="3"><cm:compliance-check-name>Check 2</cm:compliance-check-name></ReportItem></ReportHost><ReportHost name="h1"><ReportItem pluginID="21157" port="0" protocol="tcp" severity="3"><cm:compliance-check-name>Check 3</cm:compliance-check-name></ReportItem></ReportHost></Report></NessusClientData_v2>`)
+	nessknit(t, dir).wantCode(t, 0)
+
+	script := `import sys, xml.etree.ElementTree as ET
+root = ET.parse(sys.argv[1]).getroot()
+print(len(root.findall("./Report/ReportHost")), len(root.findall(".//{` + uri + `}compliance-check-name")))`
+	out, err := exec.Command(python, "-c", script, filepath.Join(dir, "Combined.nessus")).CombinedOutput()
+	if err != nil {
+		t.Fatalf("a strict parser rejects the output: %v\n%s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != "2 3" {
+		t.Errorf("strict parser saw %q hosts and checks, want \"2 3\"", got)
 	}
 }
