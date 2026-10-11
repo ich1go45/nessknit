@@ -500,3 +500,19 @@ print(len(root.findall("./Report/ReportHost")), len(root.findall(".//{` + uri + 
 		t.Errorf("strict parser saw %q hosts and checks, want \"2 3\"", got)
 	}
 }
+
+// Release binaries are built outside "go install", so the version is
+// stamped in with a linker flag.
+func TestVersionCanBeStampedAtBuildTime(t *testing.T) {
+	stamped := filepath.Join(t.TempDir(), filepath.Base(binary))
+	if out, err := exec.Command("go", "build", "-ldflags", "-X main.buildVersion=v9.9.9", "-o", stamped, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build failed: %v\n%s", err, out)
+	}
+	out, err := exec.Command(stamped, "--version").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(out)); got != "nessknit v9.9.9" {
+		t.Errorf("version output = %q, want %q", got, "nessknit v9.9.9")
+	}
+}

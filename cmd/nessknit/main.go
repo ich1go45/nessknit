@@ -111,7 +111,15 @@ func parseArgs(args []string) (options, error) {
 	return o, nil
 }
 
+// buildVersion is set with -ldflags "-X main.buildVersion=..." for
+// release binaries. When it is empty, the version comes from the
+// module information that "go install" and "go build" record.
+var buildVersion string
+
 func version() string {
+	if buildVersion != "" {
+		return buildVersion
+	}
 	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" {
 		return bi.Main.Version
 	}

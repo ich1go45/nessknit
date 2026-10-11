@@ -30,9 +30,12 @@ Tenable, Inc.
 
 ## Quick start
 
-```
-go install github.com/ich1go45/nessknit/cmd/nessknit@latest
+Download the archive for your system from the
+[latest release](https://github.com/ich1go45/nessknit/releases/latest),
+unpack it, and put `nessknit` on your `PATH` (details under
+[Install](#install)). Then:
 
+```
 cd /path/to/your/scans
 nessknit --dry-run        # preview: prints what would be merged, writes nothing
 nessknit                  # writes Combined.nessus in this directory
@@ -43,7 +46,48 @@ reporting tool.
 
 ## Install
 
-### With Go (recommended)
+### Download a binary (no Go needed)
+
+Each [release](https://github.com/ich1go45/nessknit/releases/latest)
+has a ready-to-run binary for these systems:
+
+| System | File |
+|---|---|
+| Linux, Intel/AMD | `nessknit_<version>_linux_amd64.tar.gz` |
+| Linux, ARM | `nessknit_<version>_linux_arm64.tar.gz` |
+| macOS, Apple silicon | `nessknit_<version>_darwin_arm64.tar.gz` |
+| macOS, Intel | `nessknit_<version>_darwin_amd64.tar.gz` |
+| Windows, Intel/AMD | `nessknit_<version>_windows_amd64.zip` |
+| Windows, ARM | `nessknit_<version>_windows_arm64.zip` |
+
+**Linux and macOS.** Unpack the archive and move the binary somewhere
+on your `PATH`:
+
+```
+tar -xzf nessknit_*.tar.gz nessknit
+sudo mv nessknit /usr/local/bin/
+nessknit --version
+```
+
+On macOS the binary is not signed, so the first run may be blocked.
+Clear the download flag once and run it again:
+
+```
+xattr -d com.apple.quarantine /usr/local/bin/nessknit
+```
+
+**Windows.** Unzip the file and run `nessknit.exe` from PowerShell or
+Command Prompt in that folder, or move it to a folder on your `PATH`.
+
+**Checking the download (optional).** Each release includes
+`checksums.txt`. With it in the same folder as the archive:
+
+```
+sha256sum -c --ignore-missing checksums.txt          # Linux
+shasum -a 256 -c --ignore-missing checksums.txt      # macOS
+```
+
+### With Go
 
 You need Go 1.24 or later. Check with `go version`; if it is missing,
 install it from <https://go.dev/dl/>.
@@ -278,6 +322,15 @@ the output, checked, and only then moved into place.
 go test ./...          # everything, including a 150 MB memory test
 go test -short ./...   # skip the memory test
 go vet ./...
+```
+
+To publish a release, push a version tag. A workflow tests the code,
+builds the binaries with `scripts/build-release.sh` and attaches them
+to a GitHub release:
+
+```
+git tag -a v1.2.3 -m "nessknit v1.2.3"
+git push origin v1.2.3
 ```
 
 The code is in four small packages under `internal/`: `inputs` (which
