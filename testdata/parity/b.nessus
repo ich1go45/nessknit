@@ -1,0 +1,61 @@
+<?xml version="1.0" ?>
+<NessusClientData_v2>
+<Policy><policyName>Parity policy B</policyName></Policy>
+<Report name="Scan B" xmlns:cm="http://www.nessus.org/cm">
+<ReportHost name="10.0.0.1"><HostProperties>
+<tag name="HOST_END">Tue Feb  4 09:10:00 2025</tag>
+<tag name="netbios-name">WEB01</tag>
+<tag name="operating-system">Linux Kernel 6.1</tag>
+<tag name="Credentialed_Scan">true</tag>
+</HostProperties>
+<ReportItem port="0" svc_name="general" protocol="tcp" severity="0" pluginID="19506" pluginName="Nessus Scan Information" pluginFamily="Settings">
+<description>This plugin displays information about the scan.</description>
+<plugin_output>
+Information about this scan :
+
+Nessus version : 10.8.1
+Scan name : Scan B
+</plugin_output>
+</ReportItem>
+<ReportItem port="22" svc_name="ssh" protocol="tcp" severity="0" pluginID="10267" pluginName="SSH Server Type and Version Information" pluginFamily="Service detection">
+<description>It is possible to obtain information about the remote SSH server.</description>
+<plugin_output>SSH version : SSH-2.0-OpenSSH_8.9p1</plugin_output>
+</ReportItem>
+<ReportItem port="2222" svc_name="ssh" protocol="tcp" severity="0" pluginID="10267" pluginName="SSH Server Type and Version Information" pluginFamily="Service detection">
+<description>It is possible to obtain information about the remote SSH server.</description>
+<plugin_output>
+SSH version : SSH-2.0-OpenSSH_8.9p1
+</plugin_output>
+</ReportItem>
+<ReportItem port="22" svc_name="ssh" protocol="tcp" severity="0" pluginID="10267" pluginName="SSH Server Type and Version Information" pluginFamily="Service detection">
+<description>It is possible to obtain information about the remote SSH server.</description>
+<plugin_output>
+SSH version : SSH-2.0-OpenSSH_9.6p1
+</plugin_output>
+</ReportItem>
+<ReportItem port="80" svc_name="www" protocol="tcp" severity="2" pluginID="11213" pluginName="HTTP TRACE / TRACK Methods Allowed" pluginFamily="Web Servers">
+<description>The remote web server supports the TRACE &amp; TRACK methods.</description>
+<risk_factor>Medium</risk_factor>
+<plugin_output><![CDATA[
+Request : TRACE /nessus.html HTTP/1.1
+Response: <html>café & bar</html>
+]]></plugin_output>
+</ReportItem>
+<ReportItem port="443" svc_name="www" protocol="tcp" severity="3" pluginID="42873" pluginName="SSL Medium Strength Cipher Suites Supported (SWEET32)" pluginFamily="General">
+<description>The remote host supports the use of SSL ciphers that offer medium strength encryption.</description>
+<risk_factor>High</risk_factor>
+<plugin_output>
+  Medium Strength Ciphers (&gt; 64-bit and &lt; 112-bit key, or 3DES)
+</plugin_output>
+</ReportItem>
+</ReportHost>
+<ReportHost name="10.0.0.3"><HostProperties>
+<tag name="HOST_END">Tue Feb  4 09:30:00 2025</tag>
+</HostProperties>
+<ReportItem port="3389" svc_name="msrdp" protocol="tcp" severity="1" pluginID="30218" pluginName="Terminal Services Encryption Level is not FIPS-140 Compliant" pluginFamily="Misc.">
+<description>The remote host is not FIPS-140 compliant.</description>
+<plugin_output>The terminal services encryption level is set to : 2. Medium</plugin_output>
+</ReportItem>
+</ReportHost>
+</Report>
+</NessusClientData_v2>

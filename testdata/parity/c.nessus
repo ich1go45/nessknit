@@ -1,0 +1,43 @@
+<?xml version="1.0" ?>
+<NessusClientData_v2>
+<Policy><policyName>Parity policy C</policyName></Policy>
+<Report name="Scan C" xmlns:cm="http://www.nessus.org/cm">
+<ReportHost name="10.0.0.3">
+<ReportItem port="3389" svc_name="msrdp" protocol="tcp" severity="1" pluginID="30218" pluginName="Terminal Services Encryption Level is not FIPS-140 Compliant" pluginFamily="Misc.">
+<description>The remote host is not FIPS-140 compliant.</description>
+<plugin_output>The terminal services encryption level is set to : 2. Medium</plugin_output>
+</ReportItem>
+<ReportItem port="3389" svc_name="msrdp" protocol="udp" severity="1" pluginID="30218" pluginName="Terminal Services Encryption Level is not FIPS-140 Compliant" pluginFamily="Misc.">
+<description>The remote host is not FIPS-140 compliant.</description>
+<plugin_output>The terminal services encryption level is set to : 2. Medium</plugin_output>
+</ReportItem>
+</ReportHost>
+<ReportHost name="10.0.0.2"><HostProperties>
+<tag name="HOST_END">Wed Mar  5 14:00:00 2025</tag>
+<tag name="mac-address">00:50:56:AA:BB:CC</tag>
+</HostProperties>
+<ReportItem port="445" svc_name="cifs" protocol="tcp" severity="4" pluginID="97833" pluginName="MS17-010" pluginFamily="Windows">
+<description>The remote Windows host is affected by multiple vulnerabilities.</description>
+<risk_factor>Critical</risk_factor>
+</ReportItem>
+<ReportItem port="445" svc_name="cifs" protocol="tcp" severity="0" pluginID="10785" pluginName="SMB NativeLanManager Remote System Information Disclosure" pluginFamily="Windows">
+<description>Nessus was able to obtain information about the remote operating system.</description>
+<plugin_output>The remote Operating System is : Windows Server 2016 Standard 14393</plugin_output>
+</ReportItem>
+</ReportHost>
+<ReportHost name="db01.corp.example"><HostProperties>
+<tag name="HOST_END">Wed Mar  5 14:30:00 2025</tag>
+<tag name="host-fqdn">db01.corp.example</tag>
+</HostProperties>
+<ReportItem port="0" svc_name="general" protocol="tcp" severity="0" pluginID="19506" pluginName="Nessus Scan Information" pluginFamily="Settings">
+<description>This plugin displays information about the scan.</description>
+<plugin_output>Scan name : Scan C</plugin_output>
+</ReportItem>
+<ReportItem port="0" svc_name="general" protocol="tcp" severity="3" pluginID="21157" pluginName="Unix Compliance Checks" pluginFamily="Policy Compliance">
+<description>"1.1.1 Ensure mounting of cramfs is disabled" : [FAILED]</description>
+<cm:compliance-check-name>1.1.1 Ensure mounting of cramfs is disabled</cm:compliance-check-name>
+<cm:compliance-result>FAILED</cm:compliance-result>
+</ReportItem>
+</ReportHost>
+</Report>
+</NessusClientData_v2>

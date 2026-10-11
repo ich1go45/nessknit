@@ -1,0 +1,55 @@
+<?xml version="1.0" ?>
+<NessusClientData_v2>
+<Policy><policyName>Parity policy A</policyName>
+<Preferences><ServerPreferences><preference><name>max_hosts</name><value>30</value></preference></ServerPreferences></Preferences>
+</Policy>
+<Report name="Scan A" xmlns:cm="http://www.nessus.org/cm">
+<ReportHost name="10.0.0.1"><HostProperties>
+<tag name="HOST_END">Mon Jan  6 10:20:00 2025</tag>
+<tag name="operating-system">Linux Kernel 5.15</tag>
+<tag name="host-ip">10.0.0.1</tag>
+<tag name="HOST_START">Mon Jan  6 10:00:00 2025</tag>
+</HostProperties>
+<ReportItem port="0" svc_name="general" protocol="tcp" severity="0" pluginID="19506" pluginName="Nessus Scan Information" pluginFamily="Settings">
+<description>This plugin displays information about the scan.</description>
+<plugin_output>
+Information about this scan :
+
+Nessus version : 10.7.0
+Scan name : Scan A
+</plugin_output>
+</ReportItem>
+<ReportItem port="22" svc_name="ssh" protocol="tcp" severity="0" pluginID="10267" pluginName="SSH Server Type and Version Information" pluginFamily="Service detection">
+<description>It is possible to obtain information about the remote SSH server.</description>
+<plugin_output>
+SSH version : SSH-2.0-OpenSSH_8.9p1
+</plugin_output>
+</ReportItem>
+<ReportItem port="22" svc_name="ssh" protocol="tcp" severity="0" pluginID="11219" pluginName="Nessus SYN scanner" pluginFamily="Port scanners">
+<description>This plugin is a SYN 'half-open' port scanner.</description>
+<plugin_output>Port 22/tcp was found to be open</plugin_output>
+</ReportItem>
+<ReportItem port="80" svc_name="www" protocol="tcp" severity="0" pluginID="11219" pluginName="Nessus SYN scanner" pluginFamily="Port scanners">
+<description>This plugin is a SYN 'half-open' port scanner.</description>
+<plugin_output>Port 80/tcp was found to be open</plugin_output>
+</ReportItem>
+<ReportItem port="80" svc_name="www" protocol="tcp" severity="2" pluginID="11213" pluginName="HTTP TRACE / TRACK Methods Allowed" pluginFamily="Web Servers">
+<description>The remote web server supports the TRACE &amp; TRACK methods.</description>
+<risk_factor>Medium</risk_factor>
+<plugin_output>
+Request : TRACE /nessus.html HTTP/1.1
+Response: &lt;html&gt;caf&#233; &amp; bar&lt;/html&gt;
+</plugin_output>
+</ReportItem>
+</ReportHost>
+<ReportHost name="10.0.0.2"><HostProperties>
+<tag name="HOST_END">Mon Jan  6 10:25:00 2025</tag>
+<tag name="host-ip">10.0.0.2</tag>
+</HostProperties>
+<ReportItem port="445" svc_name="cifs" protocol="tcp" severity="4" pluginID="97833" pluginName="MS17-010" pluginFamily="Windows">
+<description>The remote Windows host is affected by multiple vulnerabilities.</description>
+<risk_factor>Critical</risk_factor>
+</ReportItem>
+</ReportHost>
+</Report>
+</NessusClientData_v2>
