@@ -136,4 +136,4 @@ outside `testdata/`, which holds hand-written fixtures only.
 
 ## Licence
 
-MIT. See [LICENSE](LICENSE).
+0BSD: use it however you like, no attribution needed. See [LICENSE](LICENSE).

@@ -341,7 +341,7 @@ nessknit/
 - **README:** what the tool does, how to install it, usage examples,
   the merge rules in plain terms, exit codes, and a statement that it
   is not affiliated with Tenable.
-- **Licence:** MIT.
+- **Licence:** 0BSD (changed from MIT at the author's request: no attribution wanted).
 - **`.gitignore`:** ignores every `.nessus` file outside `testdata/`,
   so client scan data cannot be committed by accident.
 - **CI:** one GitHub Actions workflow that runs `go vet` and `go test`
